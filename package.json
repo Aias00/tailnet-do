@@ -1,0 +1,14 @@
+{
+  "name": "tailnet-do",
+  "version": "0.0.1",
+  "description": "Put a Cloudflare Durable Object on your Tailscale tailnet",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": { ".": "./src/index.js" },
+  "files": ["src/index.js", "src/wasm_exec.js", "src/tailnet.wasm"],
+  "scripts": {
+    "patch": "./scripts/apply-patches.sh",
+    "build": "./scripts/apply-patches.sh && ./scripts/build-wasm.sh"
+  },
+  "license": "BSD-3-Clause"
+}

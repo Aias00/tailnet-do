@@ -1,0 +1,39 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Divy Srivastava <divy@cloudflare.com>
+Date: Sat, 7 Nov 2026 10:59:13 +0530
+Subject: ipn/ipnlocal: allow overriding exit-node DNS resolution
+
+Add ExitNodeDNSOverride so a host can answer peerapi DoH queries from
+peers that use this node as an exit node, e.g. by forwarding them to a
+DoH upstream when the host has no system resolver.
+
+diff --git a/ipn/ipnlocal/peerapi.go b/ipn/ipnlocal/peerapi.go
+index 406472b66f70419c779a34796ef0707da3c0bd05..ad88bf99b638e2d310a9166c0641db7a7fe8aaf0 100644
+--- a/ipn/ipnlocal/peerapi.go
++++ b/ipn/ipnlocal/peerapi.go
+@@ -848,6 +848,10 @@ func offersExitNodeOrAppConnectorAndPeerHasAutogroupInternet(h PeerAPIHandler, _
+ 
+ // handleDNSQuery implements a DoH server (RFC 8484) over the peerapi.
+ // It's not over HTTPS as the spec dictates, but rather HTTP-over-WireGuard.
++// ExitNodeDNSOverride, if non-nil, answers DNS queries that peers send to this
++// node's peerapi DoH endpoint (used when this node is their exit node).
++var ExitNodeDNSOverride func(ctx context.Context, q []byte) ([]byte, error)
++
+ func (h *peerAPIHandler) handleDNSQuery(w http.ResponseWriter, r *http.Request) {
+ 	if !buildfeatures.HasDNS || h.ps.resolver == nil {
+ 		http.Error(w, "DNS not wired up", http.StatusNotImplemented)
+@@ -883,7 +887,13 @@ func (h *peerAPIHandler) handleDNSQuery(w http.ResponseWriter, r *http.Request)
+ 
+ 	ctx, cancel := context.WithTimeout(r.Context(), arbitraryTimeout)
+ 	defer cancel()
+-	res, err := h.ps.resolver.HandlePeerDNSQuery(ctx, q, h.remoteAddr, nameAllowed)
++	var res []byte
++	var err error
++	if ExitNodeDNSOverride != nil {
++		res, err = ExitNodeDNSOverride(ctx, q)
++	} else {
++		res, err = h.ps.resolver.HandlePeerDNSQuery(ctx, q, h.remoteAddr, nameAllowed)
++	}
+ 	if err != nil {
+ 		h.logf("handleDNS fwd error: %v", err)
+ 		if err := ctx.Err(); err != nil {

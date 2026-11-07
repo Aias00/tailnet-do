@@ -1,0 +1,4 @@
+[submodule "vendor/tailscale"]
+	path = vendor/tailscale
+	url = https://github.com/tailscale/tailscale.git
+	shallow = true

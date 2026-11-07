@@ -1,0 +1,52 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Divy Srivastava <divy@cloudflare.com>
+Date: Sat, 7 Nov 2026 10:59:13 +0530
+Subject: wgengine/netstack: add hooks for hosts without OS sockets
+
+Add SetForwardDialFunc so a host can supply the dialer used when
+forwarding TCP flows (subnet router / exit node), ForwardUDPHook to
+handle forwarded UDP flows instead of opening a host UDP socket, and an
+exported IsLocalIP. Used when running in a Cloudflare Durable Object,
+where outbound TCP goes through cloudflare:sockets and there is no UDP.
+
+diff --git a/wgengine/netstack/netstack.go b/wgengine/netstack/netstack.go
+index de27614100847fb60d04f823a4fb8e173086a3eb..3b0fd5ab339a75954996f8d1da3685e247c21e60 100644
+--- a/wgengine/netstack/netstack.go
++++ b/wgengine/netstack/netstack.go
+@@ -1270,6 +1270,9 @@ func (ns *Impl) isSelfDst(pkt *stack.PacketBuffer) bool {
+ 
+ // isLocalIP reports whether ip is a Tailscale IP assigned to this
+ // node directly (but not a subnet-routed IP).
++// IsLocalIP reports whether ip is one of this node's Tailscale addresses.
++func (ns *Impl) IsLocalIP(ip netip.Addr) bool { return ns.isLocalIP(ip) }
++
+ func (ns *Impl) isLocalIP(ip netip.Addr) bool {
+ 	return ns.atomicIsLocalIPFunc.Load()(ip)
+ }
+@@ -1823,6 +1826,15 @@ func (ns *Impl) acceptTCP(r *tcp.ForwarderRequest) {
+ 	}
+ }
+ 
++// SetForwardDialFunc sets the dialer used for outbound connections when
++// forwarding TCP flows (subnet router / exit node). Used by the Workers port,
++// where the standard library cannot open sockets.
++func (ns *Impl) SetForwardDialFunc(f netx.DialFunc) { ns.forwardDialFunc = f }
++
++// ForwardUDPHook, if non-nil, handles forwarded (non-local) UDP flows instead
++// of opening a host UDP socket.
++var ForwardUDPHook func(client *gonet.UDPConn, clientAddr, dstAddr netip.AddrPort)
++
+ func (ns *Impl) forwardTCP(getClient func(...tcpip.SettableSocketOption) *gonet.TCPConn, clientRemoteIP netip.Addr, wq *waiter.Queue, dialAddr netip.AddrPort, isLocal bool) (handled bool) {
+ 	dialAddrStr := dialAddr.String()
+ 	if debugNetstack() {
+@@ -2136,6 +2148,10 @@ func (ns *Impl) handleMagicDNSUDP(srcAddr netip.AddrPort, c *gonet.UDPConn) {
+ // 127.0.0.1, or any other IP (from an advertised subnet), in which case we
+ // proxy to it directly.
+ func (ns *Impl) forwardUDP(client *gonet.UDPConn, clientAddr, dstAddr netip.AddrPort) {
++	if ForwardUDPHook != nil && !ns.isLocalIP(dstAddr.Addr()) {
++		ForwardUDPHook(client, clientAddr, dstAddr)
++		return
++	}
+ 	port, srcPort := dstAddr.Port(), clientAddr.Port()
+ 	if debugNetstack() {
+ 		ns.logf("[v2] netstack: forwarding incoming UDP connection on port %v", port)
