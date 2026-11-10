@@ -50,3 +50,5 @@ require (
 )
 
 replace tailscale.com => ../vendor/tailscale
+
+replace github.com/coder/websocket => ../vendor/websocket

@@ -99,18 +99,21 @@ func await(p js.Value) (js.Value, error) {
 
 // promise runs f on a new goroutine and returns a JS Promise for its result.
 func promise(f func() (any, error)) js.Value {
-	// A Go executor passed to new Promise synchronously reenters the WASM runtime.
-	deferred := js.Global().Get("Promise").Call("withResolvers")
-	resolve, reject := deferred.Get("resolve"), deferred.Get("reject")
-	go func() {
-		v, err := f()
-		if err != nil {
-			reject.Invoke(js.Global().Get("Error").New(err.Error()))
-		} else {
-			resolve.Invoke(v)
-		}
-	}()
-	return deferred.Get("promise")
+	var exec js.Func
+	exec = js.FuncOf(func(_ js.Value, a []js.Value) any {
+		resolve, reject := a[0], a[1]
+		go func() {
+			v, err := f()
+			if err != nil {
+				reject.Invoke(js.Global().Get("Error").New(err.Error()))
+			} else {
+				resolve.Invoke(v)
+			}
+		}()
+		exec.Release()
+		return nil
+	})
+	return js.Global().Get("Promise").New(exec)
 }
 
 func toJSBytes(b []byte) js.Value {
@@ -691,6 +694,7 @@ func (n *node) status() js.Value {
 		st["name"] = strings.TrimSuffix(nm.SelfName(), ".")
 		st["addrs"] = addrs
 		st["peers"] = len(nm.Peers)
+
 	}
 	return jsonValue(st)
 }

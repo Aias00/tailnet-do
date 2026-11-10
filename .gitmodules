@@ -2,3 +2,6 @@
 	path = vendor/tailscale
 	url = https://github.com/tailscale/tailscale.git
 	shallow = true
+[submodule "vendor/websocket"]
+	path = vendor/websocket
+	url = https://github.com/coder/websocket.git

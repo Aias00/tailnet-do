@@ -1,0 +1,19 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aias00 <aias00@users.noreply.github.com>
+Date: Tue, 10 Nov 2026 00:00:00 -0800
+Subject: avoid waiting for a close event inside the JS error callback
+
+diff --git a/ws_js.go b/ws_js.go
+index 026b75f..661956d 100644
+--- a/ws_js.go
++++ b/ws_js.go
+@@ -102,7 +102,8 @@ func (c *Conn) init() {
+ 
+ 	c.releaseOnError = c.ws.OnError(func(v js.Value) {
+ 		c.setCloseErr(errors.New(v.Get("message").String()))
+-		c.closeWithInternal()
++		// Close waits for another JS event, so it must not block this callback.
++		go c.closeWithInternal()
+ 	})
+ 
+ 	c.releaseOnMessage = c.ws.OnMessage(func(e wsjs.MessageEvent) {

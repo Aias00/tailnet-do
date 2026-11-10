@@ -65,27 +65,22 @@ To change Tailscale, start from a clean pinned checkout, run `git -C vendor/tail
 
 ## Runtime checks
 
-Workers can freeze the host clock between I/O events. The runtime adapter
-advances Go's monotonic clock when a host timer fires and yields asynchronously
-instead of spinning when a wakeup is not acknowledged. It leaves wall-clock
-time and the generated Go runtime unchanged.
+The browser WebSocket dependency is pinned and patched so its `error` handler
+returns before waiting for the subsequent `close` event. Blocking that callback
+can deadlock the JavaScript event loop and terminate the Go/WASM engine.
 
 HTTP-only netcheck probes are limited to four regions (eight requests per round)
 to leave room for control-plane and relay traffic under Workers Free's
 50-subrequest limit. This caps measurements, not the regions available for
 peer relay connections.
 
-Run the frozen-clock regression with Node.js 22 or newer and Go installed. It
-checks that unmodified Go hangs with a frozen clock while the adapter completes
-the same real Go timer:
+After applying patches (`npm run patch`), run the real Go/WASM WebSocket
+regression with Node.js 22 or newer and Go installed. It checks that the original
+dependency deadlocks on a simulated browser error while the patched build
+returns the read error and remains responsive:
 
 ```sh
 npm test
-```
-
-After applying the patches, run the bridge and probe-limit tests:
-
-```sh
 cd go
 GOOS=js GOARCH=wasm go test -exec="$(go env GOROOT)/lib/wasm/go_js_wasm_exec" .
 cd ../vendor/tailscale
