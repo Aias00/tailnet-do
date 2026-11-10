@@ -193,7 +193,13 @@ export class Tailnet {
       setState: (k, v) => kv.put(prefix + k, v),
       onStatus: (s) => {
         Object.assign(t.#status, s);
-        for (const fn of t.#statusListeners) fn(t.status());
+        // status() calls back into Go; wait until the Go notification returns.
+        if (t.#statusListeners.size) {
+          queueMicrotask(() => {
+            const status = t.status();
+            for (const fn of t.#statusListeners) fn(status);
+          });
+        }
       },
     });
     await t.#node.started;
