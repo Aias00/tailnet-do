@@ -35,6 +35,7 @@ import (
 	"tailscale.com/ipn"
 	"tailscale.com/ipn/ipnlocal"
 	"tailscale.com/ipn/store/mem"
+	"tailscale.com/net/netcheck"
 	"tailscale.com/net/netns"
 	"tailscale.com/net/tsdial"
 	"tailscale.com/tsd"
@@ -98,21 +99,18 @@ func await(p js.Value) (js.Value, error) {
 
 // promise runs f on a new goroutine and returns a JS Promise for its result.
 func promise(f func() (any, error)) js.Value {
-	var exec js.Func
-	exec = js.FuncOf(func(_ js.Value, a []js.Value) any {
-		resolve, reject := a[0], a[1]
-		go func() {
-			v, err := f()
-			if err != nil {
-				reject.Invoke(js.Global().Get("Error").New(err.Error()))
-			} else {
-				resolve.Invoke(v)
-			}
-		}()
-		exec.Release()
-		return nil
-	})
-	return js.Global().Get("Promise").New(exec)
+	// A Go executor passed to new Promise synchronously reenters the WASM runtime.
+	deferred := js.Global().Get("Promise").Call("withResolvers")
+	resolve, reject := deferred.Get("resolve"), deferred.Get("reject")
+	go func() {
+		v, err := f()
+		if err != nil {
+			reject.Invoke(js.Global().Get("Error").New(err.Error()))
+		} else {
+			resolve.Invoke(v)
+		}
+	}()
+	return deferred.Get("promise")
 }
 
 func toJSBytes(b []byte) js.Value {
@@ -272,6 +270,8 @@ func hostDoH(ctx context.Context, q []byte) ([]byte, error) {
 }
 
 func installHostHooks() {
+	// Workers Free permits 50 subrequests; each HTTP region probe uses two.
+	netcheck.HTTPProbeLimit = 4
 	log.SetFlags(0)
 	log.SetOutput(writerFunc(func(p []byte) (int, error) {
 		logf("%s", strings.TrimRight(string(p), "\n"))

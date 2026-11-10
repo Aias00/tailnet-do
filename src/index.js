@@ -7,6 +7,7 @@ import { DurableObject } from "cloudflare:workers";
 import { connect as cfConnect } from "cloudflare:sockets";
 import "./wasm_exec.js";
 import engineWasm from "./tailnet.wasm";
+import { configureGoRuntime } from "./go-runtime.js";
 
 const DEFAULT_DOH = "https://cloudflare-dns.com/dns-query";
 const KEEPALIVE_MS = 20_000;
@@ -20,6 +21,7 @@ function loadEngine(options = {}) {
   if (enginePromise) return enginePromise;
   enginePromise = (async () => {
     const go = new Go();
+    configureGoRuntime(go);
     // Go's stdout/stderr: forward to console. Engine logs use host.log instead.
     const decoder = new TextDecoder();
     let partial = "";

@@ -1,0 +1,121 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Aias00 <aias00@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 23:00:00 -0800
+Subject: net/netcheck: bound HTTP-only probes for request-limited hosts
+
+diff --git a/net/netcheck/netcheck.go b/net/netcheck/netcheck.go
+index 44cc55d..a0befd4 100644
+--- a/net/netcheck/netcheck.go
++++ b/net/netcheck/netcheck.go
+@@ -54,6 +54,10 @@
+ 	debugNetcheck = envknob.RegisterBool("TS_DEBUG_NETCHECK")
+ )
+ 
++// HTTPProbeLimit bounds HTTP-only region probes in request-limited hosts.
++// Zero preserves the default of probing every eligible region.
++var HTTPProbeLimit int
++
+ // The various default timeouts for things.
+ const (
+ 	// ReportTimeout is the maximum amount of time netcheck will
+@@ -1106,6 +1110,10 @@ func (c *Client) runHTTPOnlyChecks(ctx context.Context, last *Report, rs *report
+ 		}
+ 	}
+ 
++	if HTTPProbeLimit > 0 && len(regions) > HTTPProbeLimit {
++		sort.Slice(regions, func(i, j int) bool { return regions[i].RegionID < regions[j].RegionID })
++		regions = regions[:HTTPProbeLimit]
++	}
+ 	c.logf("running HTTP-only netcheck against %v regions", len(regions))
+ 
+ 	var wg sync.WaitGroup
+@@ -1119,7 +1127,11 @@ func (c *Client) runHTTPOnlyChecks(ctx context.Context, last *Report, rs *report
+ 			// One warm-up one to get HTTP connection set
+ 			// up and get a connection from the browser's
+ 			// pool.
+-			if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode > 299 {
++			r, err := http.DefaultClient.Do(req)
++			if r != nil {
++				r.Body.Close()
++			}
++			if err != nil || r.StatusCode > 299 {
+ 				if err != nil {
+ 					c.logf("probing %s: %v", node.HostName, err)
+ 				} else {
+@@ -1128,7 +1140,11 @@ func (c *Client) runHTTPOnlyChecks(ctx context.Context, last *Report, rs *report
+ 				return
+ 			}
+ 			t0 := c.timeNow()
+-			if r, err := http.DefaultClient.Do(req); err != nil || r.StatusCode > 299 {
++			r, err = http.DefaultClient.Do(req)
++			if r != nil {
++				r.Body.Close()
++			}
++			if err != nil || r.StatusCode > 299 {
+ 				if err != nil {
+ 					c.logf("probing %s: %v", node.HostName, err)
+ 				} else {
+diff --git a/net/netcheck/http_probe_limit_test.go b/net/netcheck/http_probe_limit_test.go
+new file mode 100644
+index 0000000..9d3da4a
+--- /dev/null
++++ b/net/netcheck/http_probe_limit_test.go
+@@ -0,0 +1,58 @@
++package netcheck
++
++import (
++	"context"
++	"fmt"
++	"io"
++	"net/http"
++	"strings"
++	"sync/atomic"
++	"testing"
++	"time"
++
++	"tailscale.com/tailcfg"
++)
++
++type limitedProbeTransport struct {
++	requests atomic.Int32
++	closed   atomic.Int32
++}
++
++type limitedProbeBody struct {
++	io.Reader
++	closed *atomic.Int32
++}
++
++func (b limitedProbeBody) Close() error { b.closed.Add(1); return nil }
++
++func (tr *limitedProbeTransport) RoundTrip(req *http.Request) (*http.Response, error) {
++	tr.requests.Add(1)
++	return &http.Response{StatusCode: 200, Body: limitedProbeBody{strings.NewReader(""), &tr.closed}}, nil
++}
++
++func TestHTTPProbeLimit(t *testing.T) {
++	oldLimit, oldClient := HTTPProbeLimit, http.DefaultClient
++	t.Cleanup(func() { HTTPProbeLimit, http.DefaultClient = oldLimit, oldClient })
++	HTTPProbeLimit = 2
++	tr := new(limitedProbeTransport)
++	http.DefaultClient = &http.Client{Transport: tr}
++	dm := &tailcfg.DERPMap{Regions: map[tailcfg.DERPRegionID]*tailcfg.DERPRegion{}}
++	for i := range 8 {
++		id := tailcfg.DERPRegionID(i + 1)
++		dm.Regions[id] = &tailcfg.DERPRegion{
++			RegionID: id,
++			Nodes:    []*tailcfg.DERPNode{{HostName: fmt.Sprintf("derp%d.example", i+1), RegionID: id}},
++		}
++	}
++	c := &Client{}
++	rs := &reportState{c: c, report: &Report{RegionLatency: map[tailcfg.DERPRegionID]time.Duration{}}}
++	if err := c.runHTTPOnlyChecks(context.Background(), nil, rs, dm); err != nil {
++		t.Fatal(err)
++	}
++	if got := tr.requests.Load(); got != 4 {
++		t.Fatalf("requests = %d, want 4 (two per region)", got)
++	}
++	if got := tr.closed.Load(); got != tr.requests.Load() {
++		t.Fatalf("closed bodies = %d, want %d", got, tr.requests.Load())
++	}
++}

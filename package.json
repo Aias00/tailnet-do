@@ -5,8 +5,9 @@
   "type": "module",
   "main": "src/index.js",
   "exports": { ".": "./src/index.js" },
-  "files": ["src/index.js", "src/wasm_exec.js", "src/tailnet.wasm"],
+  "files": ["src/index.js", "src/go-runtime.js", "src/wasm_exec.js", "src/tailnet.wasm"],
   "scripts": {
+    "test": "node --test src/go-runtime.test.js test/go-runtime.integration.test.js",
     "patch": "./scripts/apply-patches.sh",
     "build": "./scripts/apply-patches.sh && ./scripts/build-wasm.sh"
   },
