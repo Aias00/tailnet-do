@@ -1,5 +1,8 @@
 # tailnet-do
 
+Fork status: [experimental Workers runtime fixes](docs/runtime-investigation.md).
+Local regression tests pass; deployed outbound forwarding is not yet reliable.
+
 Put a Cloudflare Durable Object on your Tailscale tailnet. The object becomes a normal tailnet device with its own `100.x` address. It can serve HTTP or TCP to your other devices, dial into private machines, and act as an exit node or subnet router.
 
 Under the hood this is Tailscale's own userspace client (WireGuard, netstack, DERP) compiled to WebAssembly. The control plane and DERP relays are reached over outbound WebSockets. Traffic that leaves an exit node goes out through `cloudflare:sockets`.
